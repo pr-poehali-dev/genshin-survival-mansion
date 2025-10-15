@@ -22,7 +22,7 @@ const Index = () => {
     hideAction,
     handleExit,
     handleToggleSound
-  } = useGameLogic({ locations, antagonists, soundEnabled: gameState.soundEnabled });
+  } = useGameLogic({ locations, antagonists, soundEnabled: true });
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
