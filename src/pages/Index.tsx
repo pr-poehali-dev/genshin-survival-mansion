@@ -9,11 +9,19 @@ import { Progress } from '@/components/ui/progress';
 type Location = 'menu' | 'corridor' | 'basement' | 'library' | 'attic' | 'bedroom' | 'kitchen' | 'ending';
 type Antagonist = 'dottore' | 'tartaglia' | 'venti' | 'scaramouche' | 'sandrone';
 type EndingType = 'insanity' | 'caught' | 'exhaustion' | 'cursed' | 'sacrifice';
+type Difficulty = 'easy' | 'normal' | 'nightmare';
 
 interface GameEvent {
   message: string;
-  type: 'danger' | 'warning' | 'info';
+  type: 'danger' | 'warning' | 'info' | 'help';
   antagonist?: Antagonist;
+}
+
+interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  unlocked: boolean;
 }
 
 interface GameState {
@@ -28,6 +36,9 @@ interface GameState {
   currentEvent: GameEvent | null;
   ending: EndingType | null;
   isHiding: boolean;
+  difficulty: Difficulty;
+  achievements: Achievement[];
+  soundEnabled: boolean;
 }
 
 const Index = () => {
@@ -48,8 +59,22 @@ const Index = () => {
     timeElapsed: 0,
     currentEvent: null,
     ending: null,
-    isHiding: false
+    isHiding: false,
+    difficulty: 'normal',
+    achievements: [
+      { id: 'survivor', name: 'Выживший', description: 'Продержался 3 минуты', unlocked: false },
+      { id: 'collector', name: 'Коллекционер', description: 'Найди 5 предметов', unlocked: false },
+      { id: 'rulebreaker', name: 'Нарушитель', description: 'Нарушь 3 правила', unlocked: false },
+      { id: 'explorer', name: 'Исследователь', description: 'Посети все локации', unlocked: false },
+      { id: 'escaped', name: 'Спасённый', description: 'Встретил Муалани', unlocked: false },
+    ],
+    soundEnabled: true
   });
+
+  const playSound = (soundType: 'footsteps' | 'heartbeat' | 'whisper' | 'door' | 'scream') => {
+    if (!gameState.soundEnabled) return;
+    console.log(`🔊 Звук: ${soundType}`);
+  };
 
   const locations = [
     { id: 'corridor', name: 'Коридоры', icon: 'Footprints', danger: 2, description: 'Тускло освещенные проходы, где слышны шаги' },
@@ -88,6 +113,8 @@ const Index = () => {
         if (newTime % 15 === 0 && Math.random() > 0.5) {
           newState = triggerRandomEvent(newState);
         }
+        
+        newState = checkAchievements(newState);
 
         if (newTime % 10 === 0) {
           const antagonistKeys = Object.keys(prev.antagonistActivity) as Antagonist[];
@@ -112,24 +139,71 @@ const Index = () => {
       { message: 'Венти насмехается где-то рядом', type: 'warning', antagonist: 'venti' },
       { message: 'Скарамучча в ярости. Воздух наэлектризован.', type: 'danger', antagonist: 'scaramouche' },
       { message: 'Марионетки Сандроне движутся по коридорам', type: 'danger', antagonist: 'sandrone' },
+      { message: '🌊 Муалани появилась! Она принесла медикаменты и успокоила вас.', type: 'help' },
+      { message: '✨ Барбара поёт громкую песню, привлекая внимание антагонистов!', type: 'danger' },
+      { message: '🎭 Итер подшутил над вами, заперев дверь. Вы теряете время...', type: 'warning' },
     ];
 
     const randomEvent = events[Math.floor(Math.random() * events.length)];
     
-    let sanityLoss = randomEvent.type === 'danger' ? 10 : randomEvent.type === 'warning' ? 5 : 2;
+    const difficultyMultiplier = state.difficulty === 'nightmare' ? 2 : state.difficulty === 'normal' ? 1 : 0.5;
+    let sanityLoss = (randomEvent.type === 'danger' ? 10 : randomEvent.type === 'warning' ? 5 : 2) * difficultyMultiplier;
+    
+    if (randomEvent.type === 'help') {
+      playSound('whisper');
+      const newAchievements = state.achievements.map(a => 
+        a.id === 'escaped' ? { ...a, unlocked: true } : a
+      );
+      return {
+        ...state,
+        health: Math.min(100, state.health + 20),
+        sanity: Math.min(100, state.sanity + 15),
+        currentEvent: randomEvent,
+        achievements: newAchievements
+      };
+    }
+    
+    if (randomEvent.message.includes('Барбара')) {
+      playSound('whisper');
+      const antagonistKeys = Object.keys(state.antagonistActivity) as Antagonist[];
+      const updatedActivity = { ...state.antagonistActivity };
+      antagonistKeys.forEach(key => {
+        if (Math.random() > 0.5) updatedActivity[key] = true;
+      });
+      return {
+        ...state,
+        sanity: Math.max(0, state.sanity - 15 * difficultyMultiplier),
+        antagonistActivity: updatedActivity,
+        currentEvent: randomEvent
+      };
+    }
+    
+    if (randomEvent.message.includes('Итер')) {
+      playSound('door');
+      return {
+        ...state,
+        sanity: Math.max(0, state.sanity - 10 * difficultyMultiplier),
+        timeElapsed: state.timeElapsed + 10,
+        currentEvent: randomEvent
+      };
+    }
     
     if (randomEvent.antagonist && state.antagonistActivity[randomEvent.antagonist]) {
-      sanityLoss += 15;
+      sanityLoss += 15 * difficultyMultiplier;
       if (Math.random() > 0.7 && !state.isHiding) {
+        playSound('scream');
         return {
           ...state,
-          health: Math.max(0, state.health - 20),
+          health: Math.max(0, state.health - 20 * difficultyMultiplier),
           sanity: Math.max(0, state.sanity - sanityLoss),
           rulesViolated: state.rulesViolated + 1,
           currentEvent: { ...randomEvent, message: randomEvent.message + ' ВЫ ОБНАРУЖЕНЫ!' }
         };
       }
     }
+    
+    if (randomEvent.type === 'danger') playSound('heartbeat');
+    if (randomEvent.type === 'warning') playSound('footsteps');
 
     return {
       ...state,
@@ -160,7 +234,26 @@ const Index = () => {
     return state;
   };
 
-  const startGame = () => {
+  const checkAchievements = (state: GameState): GameState => {
+    const newAchievements = state.achievements.map(achievement => {
+      if (achievement.unlocked) return achievement;
+      
+      if (achievement.id === 'survivor' && state.timeElapsed >= 180) {
+        return { ...achievement, unlocked: true };
+      }
+      if (achievement.id === 'collector' && state.inventory.length >= 5) {
+        return { ...achievement, unlocked: true };
+      }
+      if (achievement.id === 'rulebreaker' && state.rulesViolated >= 3) {
+        return { ...achievement, unlocked: true };
+      }
+      return achievement;
+    });
+    
+    return { ...state, achievements: newAchievements };
+  };
+
+  const startGame = (difficulty: Difficulty = 'normal') => {
     setGameState({
       currentLocation: 'corridor',
       health: 100,
@@ -178,7 +271,10 @@ const Index = () => {
       timeElapsed: 0,
       currentEvent: null,
       ending: null,
-      isHiding: false
+      isHiding: false,
+      difficulty,
+      achievements: gameState.achievements,
+      soundEnabled: gameState.soundEnabled
     });
   };
 
@@ -333,6 +429,20 @@ const Index = () => {
                 </div>
               </div>
 
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-[#8B0000] mb-3">Достижения</h3>
+                <div className="flex flex-wrap gap-2 justify-center">
+                  {gameState.achievements.filter(a => a.unlocked).map(achievement => (
+                    <Badge key={achievement.id} className="bg-[#8B0000]/20 border-[#8B0000] text-gray-300">
+                      ✅ {achievement.name}
+                    </Badge>
+                  ))}
+                  {gameState.achievements.filter(a => a.unlocked).length === 0 && (
+                    <div className="text-gray-500 text-sm">Достижения не получены</div>
+                  )}
+                </div>
+              </div>
+
               <Button 
                 onClick={() => setGameState({ ...gameState, currentLocation: 'menu', ending: null })}
                 size="lg"
@@ -396,13 +506,82 @@ const Index = () => {
             </CardContent>
           </Card>
 
-          <div className="text-center">
+          <Card className="bg-[#1C1C1C]/90 border-[#8B0000]/30 backdrop-blur mb-6">
+            <CardHeader>
+              <CardTitle className="text-2xl text-[#8B0000] flex items-center gap-2">
+                <Icon name="Target" size={24} />
+                Выберите сложность
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Button 
+                  onClick={() => startGame('easy')}
+                  variant="outline"
+                  className="border-green-500/50 text-gray-300 hover:bg-green-500/10 h-24 flex flex-col gap-2"
+                >
+                  <span className="text-lg font-bold">🌱 Лёгкий</span>
+                  <span className="text-xs text-gray-500">Меньше урона, больше времени</span>
+                </Button>
+                <Button 
+                  onClick={() => startGame('normal')}
+                  className="bg-[#8B0000] hover:bg-[#A00000] text-white h-24 flex flex-col gap-2 pulse-glow"
+                >
+                  <span className="text-lg font-bold">⚔️ Нормальный</span>
+                  <span className="text-xs">Сбалансированное выживание</span>
+                </Button>
+                <Button 
+                  onClick={() => startGame('nightmare')}
+                  variant="outline"
+                  className="border-red-500/50 text-gray-300 hover:bg-red-500/10 h-24 flex flex-col gap-2"
+                >
+                  <span className="text-lg font-bold">🔥 Кошмар</span>
+                  <span className="text-xs text-gray-500">Двойной урон, максимальная опасность</span>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-[#1C1C1C]/90 border-[#8B0000]/30 backdrop-blur mb-6">
+            <CardHeader>
+              <CardTitle className="text-2xl text-[#8B0000] flex items-center gap-2">
+                <Icon name="Trophy" size={24} />
+                Достижения
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {gameState.achievements.map(achievement => (
+                  <div 
+                    key={achievement.id}
+                    className={`flex items-center justify-between p-3 rounded border ${
+                      achievement.unlocked 
+                        ? 'bg-[#8B0000]/20 border-[#8B0000]/50' 
+                        : 'bg-black/20 border-[#8B0000]/10'
+                    }`}
+                  >
+                    <div>
+                      <div className={`font-semibold ${
+                        achievement.unlocked ? 'text-[#8B0000]' : 'text-gray-500'
+                      }`}>
+                        {achievement.unlocked ? '✅' : '🔒'} {achievement.name}
+                      </div>
+                      <div className="text-xs text-gray-500">{achievement.description}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="flex justify-center gap-4">
             <Button 
-              onClick={startGame}
-              size="lg"
-              className="bg-[#8B0000] hover:bg-[#A00000] text-white text-xl px-12 py-6 pulse-glow"
+              variant="outline"
+              onClick={() => setGameState({ ...gameState, soundEnabled: !gameState.soundEnabled })}
+              className="border-[#8B0000]/50 text-gray-300"
             >
-              Войти в особняк
+              <Icon name={gameState.soundEnabled ? 'Volume2' : 'VolumeX'} size={16} className="mr-2" />
+              {gameState.soundEnabled ? 'Звук вкл.' : 'Звук выкл.'}
             </Button>
           </div>
 
