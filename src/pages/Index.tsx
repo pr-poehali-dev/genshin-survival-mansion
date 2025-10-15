@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -6,8 +6,15 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import Icon from '@/components/ui/icon';
 import { Progress } from '@/components/ui/progress';
 
-type Location = 'menu' | 'corridor' | 'basement' | 'library' | 'attic' | 'bedroom' | 'kitchen';
+type Location = 'menu' | 'corridor' | 'basement' | 'library' | 'attic' | 'bedroom' | 'kitchen' | 'ending';
 type Antagonist = 'dottore' | 'tartaglia' | 'venti' | 'scaramouche' | 'sandrone';
+type EndingType = 'insanity' | 'caught' | 'exhaustion' | 'cursed' | 'sacrifice';
+
+interface GameEvent {
+  message: string;
+  type: 'danger' | 'warning' | 'info';
+  antagonist?: Antagonist;
+}
 
 interface GameState {
   currentLocation: Location;
@@ -17,6 +24,10 @@ interface GameState {
   rulesViolated: number;
   discoveredClues: number;
   antagonistActivity: { [key in Antagonist]: boolean };
+  timeElapsed: number;
+  currentEvent: GameEvent | null;
+  ending: EndingType | null;
+  isHiding: boolean;
 }
 
 const Index = () => {
@@ -33,7 +44,11 @@ const Index = () => {
       venti: false,
       scaramouche: false,
       sandrone: false
-    }
+    },
+    timeElapsed: 0,
+    currentEvent: null,
+    ending: null,
+    isHiding: false
   });
 
   const locations = [
@@ -62,15 +77,108 @@ const Index = () => {
     '🔦 Не тратьте батарею фонаря впустую'
   ];
 
+  useEffect(() => {
+    if (gameState.currentLocation === 'menu' || gameState.currentLocation === 'ending') return;
+
+    const timer = setInterval(() => {
+      setGameState(prev => {
+        const newTime = prev.timeElapsed + 1;
+        let newState = { ...prev, timeElapsed: newTime };
+
+        if (newTime % 15 === 0 && Math.random() > 0.5) {
+          newState = triggerRandomEvent(newState);
+        }
+
+        if (newTime % 10 === 0) {
+          const antagonistKeys = Object.keys(prev.antagonistActivity) as Antagonist[];
+          const randomAntagonist = antagonistKeys[Math.floor(Math.random() * antagonistKeys.length)];
+          newState.antagonistActivity[randomAntagonist] = Math.random() > 0.6;
+        }
+
+        return checkEnding(newState);
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [gameState.currentLocation]);
+
+  const triggerRandomEvent = (state: GameState): GameState => {
+    const events: GameEvent[] = [
+      { message: 'Вы слышите шаги за дверью...', type: 'warning' },
+      { message: 'Свет начинает мерцать', type: 'danger' },
+      { message: 'Тишина становится невыносимой', type: 'info' },
+      { message: 'Дотторе близко. Вы чувствуете запах химикатов.', type: 'danger', antagonist: 'dottore' },
+      { message: 'Тарталья охотится. Слышен звук оружия.', type: 'danger', antagonist: 'tartaglia' },
+      { message: 'Венти насмехается где-то рядом', type: 'warning', antagonist: 'venti' },
+      { message: 'Скарамучча в ярости. Воздух наэлектризован.', type: 'danger', antagonist: 'scaramouche' },
+      { message: 'Марионетки Сандроне движутся по коридорам', type: 'danger', antagonist: 'sandrone' },
+    ];
+
+    const randomEvent = events[Math.floor(Math.random() * events.length)];
+    
+    let sanityLoss = randomEvent.type === 'danger' ? 10 : randomEvent.type === 'warning' ? 5 : 2;
+    
+    if (randomEvent.antagonist && state.antagonistActivity[randomEvent.antagonist]) {
+      sanityLoss += 15;
+      if (Math.random() > 0.7 && !state.isHiding) {
+        return {
+          ...state,
+          health: Math.max(0, state.health - 20),
+          sanity: Math.max(0, state.sanity - sanityLoss),
+          rulesViolated: state.rulesViolated + 1,
+          currentEvent: { ...randomEvent, message: randomEvent.message + ' ВЫ ОБНАРУЖЕНЫ!' }
+        };
+      }
+    }
+
+    return {
+      ...state,
+      sanity: Math.max(0, state.sanity - sanityLoss),
+      currentEvent: randomEvent
+    };
+  };
+
+  const checkEnding = (state: GameState): GameState => {
+    if (state.ending) return state;
+
+    if (state.health <= 0) {
+      return { ...state, currentLocation: 'ending', ending: 'caught' };
+    }
+    if (state.sanity <= 0) {
+      return { ...state, currentLocation: 'ending', ending: 'insanity' };
+    }
+    if (state.timeElapsed >= 300) {
+      return { ...state, currentLocation: 'ending', ending: 'exhaustion' };
+    }
+    if (state.rulesViolated >= 5) {
+      return { ...state, currentLocation: 'ending', ending: 'cursed' };
+    }
+    if (state.discoveredClues >= 10 && state.health < 30) {
+      return { ...state, currentLocation: 'ending', ending: 'sacrifice' };
+    }
+
+    return state;
+  };
+
   const startGame = () => {
     setGameState({
-      ...gameState,
       currentLocation: 'corridor',
       health: 100,
       sanity: 100,
       inventory: ['🔦 Фонарь'],
       rulesViolated: 0,
-      discoveredClues: 0
+      discoveredClues: 0,
+      antagonistActivity: {
+        dottore: false,
+        tartaglia: false,
+        venti: false,
+        scaramouche: false,
+        sandrone: false
+      },
+      timeElapsed: 0,
+      currentEvent: null,
+      ending: null,
+      isHiding: false
     });
   };
 
@@ -81,23 +189,163 @@ const Index = () => {
     const sanityLoss = location.danger * 5;
     const newSanity = Math.max(0, gameState.sanity - sanityLoss);
 
-    setGameState({
-      ...gameState,
-      currentLocation: locationId as Location,
-      sanity: newSanity
-    });
+    const activeAntagonists = Object.entries(gameState.antagonistActivity)
+      .filter(([_, active]) => active)
+      .map(([id]) => id as Antagonist);
+
+    if (activeAntagonists.length > 0 && Math.random() > 0.6) {
+      const randomAntagonist = activeAntagonists[Math.floor(Math.random() * activeAntagonists.length)];
+      setGameState({
+        ...gameState,
+        currentLocation: locationId as Location,
+        sanity: newSanity,
+        health: Math.max(0, gameState.health - 15),
+        rulesViolated: gameState.rulesViolated + 1,
+        currentEvent: {
+          message: `При входе вы столкнулись с ${antagonists.find(a => a.id === randomAntagonist)?.name}!`,
+          type: 'danger',
+          antagonist: randomAntagonist
+        },
+        isHiding: false
+      });
+    } else {
+      setGameState({
+        ...gameState,
+        currentLocation: locationId as Location,
+        sanity: newSanity,
+        currentEvent: null,
+        isHiding: false
+      });
+    }
   };
 
   const findItem = () => {
     const items = ['🗝️ Старый ключ', '📖 Дневник', '🕯️ Свеча', '💊 Медикаменты', '🔮 Странный артефакт'];
     const randomItem = items[Math.floor(Math.random() * items.length)];
     
+    const isTrap = Math.random() > 0.7;
+    
+    if (isTrap) {
+      setGameState({
+        ...gameState,
+        health: Math.max(0, gameState.health - 10),
+        sanity: Math.max(0, gameState.sanity - 10),
+        rulesViolated: gameState.rulesViolated + 1,
+        currentEvent: {
+          message: 'Это была ловушка! Вы привлекли внимание.',
+          type: 'danger'
+        }
+      });
+    } else {
+      setGameState({
+        ...gameState,
+        inventory: [...gameState.inventory, randomItem],
+        discoveredClues: gameState.discoveredClues + 1,
+        health: randomItem === '💊 Медикаменты' ? Math.min(100, gameState.health + 15) : gameState.health,
+        currentEvent: {
+          message: `Найдено: ${randomItem}`,
+          type: 'info'
+        }
+      });
+    }
+  };
+
+  const hideAction = () => {
     setGameState({
       ...gameState,
-      inventory: [...gameState.inventory, randomItem],
-      discoveredClues: gameState.discoveredClues + 1
+      isHiding: true,
+      sanity: Math.max(0, gameState.sanity - 5),
+      currentEvent: {
+        message: 'Вы прячетесь в темноте...',
+        type: 'info'
+      }
     });
+
+    setTimeout(() => {
+      setGameState(prev => ({
+        ...prev,
+        isHiding: false,
+        currentEvent: null
+      }));
+    }, 5000);
   };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getEnding = (endingType: EndingType) => {
+    const endings = {
+      insanity: {
+        title: 'БЕЗУМИЕ',
+        description: 'Ваш разум не выдержал ужасов особняка. Теперь вы один из его призраков, обречённых вечно бродить по коридорам.',
+        icon: 'Brain'
+      },
+      caught: {
+        title: 'ПОЙМАНЫ',
+        description: 'Антагонисты настигли вас. Ваша судьба стала частью мрачной коллекции этого особняка.',
+        icon: 'Skull'
+      },
+      exhaustion: {
+        title: 'ИСТОЩЕНИЕ',
+        description: 'Время вышло. Силы покинули вас в самый критический момент. Особняк поглотил ещё одну душу.',
+        icon: 'Timer'
+      },
+      cursed: {
+        title: 'ПРОКЛЯТИЕ',
+        description: 'Вы нарушили слишком много правил. Проклятие особняка отныне следует за вами вечно.',
+        icon: 'Ghost'
+      },
+      sacrifice: {
+        title: 'ЖЕРТВА',
+        description: 'Вы узнали слишком много. Знания о тайнах особняка требуют цену — вашу душу.',
+        icon: 'BookOpen'
+      }
+    };
+    return endings[endingType];
+  };
+
+  if (gameState.currentLocation === 'ending' && gameState.ending) {
+    const ending = getEnding(gameState.ending);
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-[#0A0A0F] via-[#1A0A0F] to-[#0A0A0F] flex items-center justify-center p-4">
+        <div className="max-w-3xl w-full">
+          <Card className="bg-[#1C1C1C]/95 border-[#8B0000]/50 backdrop-blur">
+            <CardContent className="pt-12 pb-12 text-center">
+              <Icon name={ending.icon} size={80} className="text-[#8B0000] mx-auto mb-6 flicker" />
+              <h1 className="text-5xl font-bold text-[#8B0000] mb-6">{ending.title}</h1>
+              <p className="text-xl text-gray-300 mb-8 leading-relaxed">{ending.description}</p>
+              
+              <div className="grid grid-cols-3 gap-4 mb-8 text-center">
+                <div className="bg-black/40 p-4 rounded border border-[#8B0000]/20">
+                  <div className="text-2xl font-bold text-[#8B0000]">{formatTime(gameState.timeElapsed)}</div>
+                  <div className="text-sm text-gray-500">Время выжило</div>
+                </div>
+                <div className="bg-black/40 p-4 rounded border border-[#8B0000]/20">
+                  <div className="text-2xl font-bold text-[#8B0000]">{gameState.discoveredClues}</div>
+                  <div className="text-sm text-gray-500">Улик найдено</div>
+                </div>
+                <div className="bg-black/40 p-4 rounded border border-[#8B0000]/20">
+                  <div className="text-2xl font-bold text-[#8B0000]">{gameState.rulesViolated}</div>
+                  <div className="text-sm text-gray-500">Правил нарушено</div>
+                </div>
+              </div>
+
+              <Button 
+                onClick={() => setGameState({ ...gameState, currentLocation: 'menu', ending: null })}
+                size="lg"
+                className="bg-[#8B0000] hover:bg-[#A00000] text-white text-xl px-12 py-6"
+              >
+                Начать заново
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   if (gameState.currentLocation === 'menu') {
     return (
@@ -172,17 +420,36 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#0A0A0F] via-[#1A0A0F] to-[#0A0A0F] p-4">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-6 flex justify-between items-center">
-          <h1 className="text-4xl font-bold text-[#8B0000] flicker">ОСОБНЯК ТЕНЕЙ</h1>
-          <Button 
-            variant="outline" 
-            onClick={() => setGameState({ ...gameState, currentLocation: 'menu' })}
-            className="border-[#8B0000]/50 text-gray-300"
-          >
-            <Icon name="DoorOpen" size={16} className="mr-2" />
-            Выход
-          </Button>
+        <div className="mb-6 flex justify-between items-center flex-wrap gap-4">
+          <h1 className="text-3xl md:text-4xl font-bold text-[#8B0000] flicker">ОСОБНЯК ТЕНЕЙ</h1>
+          <div className="flex gap-4 items-center">
+            <div className="text-right">
+              <div className="text-2xl font-bold text-[#8B0000] font-mono">{formatTime(gameState.timeElapsed)}</div>
+              <div className="text-xs text-gray-500">Время в особняке</div>
+            </div>
+            <Button 
+              variant="outline" 
+              onClick={() => setGameState({ ...gameState, currentLocation: 'menu' })}
+              className="border-[#8B0000]/50 text-gray-300"
+            >
+              <Icon name="DoorOpen" size={16} className="mr-2" />
+              Выход
+            </Button>
+          </div>
         </div>
+
+        {gameState.currentEvent && (
+          <Alert className={`mb-6 ${
+            gameState.currentEvent.type === 'danger' ? 'bg-[#8B0000]/20 border-[#8B0000]' :
+            gameState.currentEvent.type === 'warning' ? 'bg-[#A0522D]/20 border-[#A0522D]' :
+            'bg-[#2D1B1F]/20 border-[#2D1B1F]'
+          } animate-pulse`}>
+            <Icon name={gameState.currentEvent.type === 'danger' ? 'AlertTriangle' : 'Info'} size={16} />
+            <AlertDescription className="text-gray-200 font-semibold">
+              {gameState.currentEvent.message}
+            </AlertDescription>
+          </Alert>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           <Card className="bg-[#1C1C1C]/90 border-[#8B0000]/30">
@@ -275,6 +542,7 @@ const Index = () => {
                 <Button 
                   onClick={findItem}
                   className="bg-[#2D1B1F] hover:bg-[#3D2B2F] text-gray-300 flex-1"
+                  disabled={gameState.isHiding}
                 >
                   <Icon name="Search" size={16} className="mr-2" />
                   Исследовать
@@ -282,10 +550,11 @@ const Index = () => {
                 <Button 
                   variant="outline"
                   className="border-[#8B0000]/50 text-gray-300 flex-1"
-                  disabled={gameState.sanity < 20}
+                  disabled={gameState.sanity < 20 || gameState.isHiding}
+                  onClick={hideAction}
                 >
                   <Icon name="EyeOff" size={16} className="mr-2" />
-                  Спрятаться
+                  {gameState.isHiding ? 'Прячетесь...' : 'Спрятаться'}
                 </Button>
               </CardContent>
             </Card>
