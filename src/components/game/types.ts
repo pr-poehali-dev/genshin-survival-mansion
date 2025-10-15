@@ -48,3 +48,24 @@ export interface AntagonistData {
   icon: string;
   color: string;
 }
+
+export interface PlayerStats {
+  totalGames: number;
+  totalTime: number;
+  bestSurvivalTime: number;
+  itemsCollected: number;
+  rulesViolated: number;
+  antagonistsEncountered: number;
+  endings: { [key in EndingType]: number };
+  favoriteLocation: string;
+}
+
+export interface GameSettings {
+  soundEnabled: boolean;
+  musicVolume: number;
+  sfxVolume: number;
+  difficulty: Difficulty;
+  showHints: boolean;
+  screenShake: boolean;
+  autoSave: boolean;
+}

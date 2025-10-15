@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import MainMenu from '@/components/game/MainMenu';
 import GameScreen from '@/components/game/GameScreen';
 import EndingScreen from '@/components/game/EndingScreen';
-import { GameState, Antagonist, Difficulty, GameEvent, LocationData, AntagonistData } from '@/components/game/types';
+import SettingsPanel from '@/components/game/SettingsPanel';
+import PlayerStatsPanel from '@/components/game/PlayerStatsPanel';
+import { GameState, Antagonist, Difficulty, GameEvent, LocationData, AntagonistData, PlayerStats, EndingType } from '@/components/game/types';
 
 const Index = () => {
   const [gameState, setGameState] = useState<GameState>({
@@ -33,6 +35,52 @@ const Index = () => {
     ],
     soundEnabled: true
   });
+
+  const [showSettings, setShowSettings] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const [settings, setSettings] = useState({
+    musicVolume: 70,
+    sfxVolume: 80,
+    showHints: true,
+    screenShake: true,
+    autoSave: true
+  });
+
+  const [playerStats, setPlayerStats] = useState<PlayerStats>({
+    totalGames: 0,
+    totalTime: 0,
+    bestSurvivalTime: 0,
+    itemsCollected: 0,
+    rulesViolated: 0,
+    antagonistsEncountered: 0,
+    endings: {
+      insanity: 0,
+      caught: 0,
+      exhaustion: 0,
+      cursed: 0,
+      sacrifice: 0
+    },
+    favoriteLocation: 'Коридоры'
+  });
+
+  useEffect(() => {
+    const savedStats = localStorage.getItem('mansionStats');
+    if (savedStats) {
+      setPlayerStats(JSON.parse(savedStats));
+    }
+    const savedSettings = localStorage.getItem('mansionSettings');
+    if (savedSettings) {
+      setSettings(JSON.parse(savedSettings));
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('mansionStats', JSON.stringify(playerStats));
+  }, [playerStats]);
+
+  useEffect(() => {
+    localStorage.setItem('mansionSettings', JSON.stringify(settings));
+  }, [settings]);
 
   const playSound = (soundType: 'footsteps' | 'heartbeat' | 'whisper' | 'door' | 'scream') => {
     if (!gameState.soundEnabled) return;
@@ -336,6 +384,20 @@ const Index = () => {
   };
 
   const handleRestart = () => {
+    if (gameState.ending) {
+      setPlayerStats(prev => ({
+        ...prev,
+        totalGames: prev.totalGames + 1,
+        totalTime: prev.totalTime + gameState.timeElapsed,
+        bestSurvivalTime: Math.max(prev.bestSurvivalTime, gameState.timeElapsed),
+        itemsCollected: prev.itemsCollected + gameState.inventory.length,
+        rulesViolated: prev.rulesViolated + gameState.rulesViolated,
+        endings: {
+          ...prev.endings,
+          [gameState.ending]: prev.endings[gameState.ending] + 1
+        }
+      }));
+    }
     setGameState({ ...gameState, currentLocation: 'menu', ending: null });
   };
 
@@ -347,39 +409,167 @@ const Index = () => {
     setGameState({ ...gameState, soundEnabled: !gameState.soundEnabled });
   };
 
+  const handleResetStats = () => {
+    setPlayerStats({
+      totalGames: 0,
+      totalTime: 0,
+      bestSurvivalTime: 0,
+      itemsCollected: 0,
+      rulesViolated: 0,
+      antagonistsEncountered: 0,
+      endings: {
+        insanity: 0,
+        caught: 0,
+        exhaustion: 0,
+        cursed: 0,
+        sacrifice: 0
+      },
+      favoriteLocation: 'Коридоры'
+    });
+  };
+
   if (gameState.currentLocation === 'ending') {
     return (
-      <EndingScreen 
-        gameState={gameState}
-        formatTime={formatTime}
-        onRestart={handleRestart}
-      />
+      <>
+        <EndingScreen 
+          gameState={gameState}
+          formatTime={formatTime}
+          onRestart={handleRestart}
+        />
+        {showSettings && (
+          <SettingsPanel
+            soundEnabled={gameState.soundEnabled}
+            musicVolume={settings.musicVolume}
+            sfxVolume={settings.sfxVolume}
+            difficulty={gameState.difficulty}
+            showHints={settings.showHints}
+            screenShake={settings.screenShake}
+            autoSave={settings.autoSave}
+            onToggleSound={handleToggleSound}
+            onMusicVolumeChange={(v) => setSettings({ ...settings, musicVolume: v })}
+            onSfxVolumeChange={(v) => setSettings({ ...settings, sfxVolume: v })}
+            onDifficultyChange={(d) => setGameState({ ...gameState, difficulty: d })}
+            onToggleHints={() => setSettings({ ...settings, showHints: !settings.showHints })}
+            onToggleScreenShake={() => setSettings({ ...settings, screenShake: !settings.screenShake })}
+            onToggleAutoSave={() => setSettings({ ...settings, autoSave: !settings.autoSave })}
+            onClose={() => setShowSettings(false)}
+          />
+        )}
+        {showStats && (
+          <PlayerStatsPanel
+            stats={playerStats}
+            formatTime={formatTime}
+            onClose={() => setShowStats(false)}
+            onResetStats={handleResetStats}
+          />
+        )}
+      </>
     );
   }
 
   if (gameState.currentLocation === 'menu') {
     return (
-      <MainMenu 
-        gameState={gameState}
-        antagonists={antagonists}
-        rules={rules}
-        onStartGame={startGame}
-        onToggleSound={handleToggleSound}
-      />
+      <>
+        <MainMenu 
+          gameState={gameState}
+          antagonists={antagonists}
+          rules={rules}
+          onStartGame={startGame}
+          onToggleSound={handleToggleSound}
+        />
+        <div className="fixed bottom-4 right-4 flex gap-2 z-40">
+          <button
+            onClick={() => setShowStats(true)}
+            className="p-3 bg-[#1C1C1C]/90 border border-[#8B0000]/30 rounded-lg hover:bg-[#8B0000]/20 transition-all"
+            title="Статистика"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8B0000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 3v18h18"/>
+              <path d="m19 9-5 5-4-4-3 3"/>
+            </svg>
+          </button>
+          <button
+            onClick={() => setShowSettings(true)}
+            className="p-3 bg-[#1C1C1C]/90 border border-[#8B0000]/30 rounded-lg hover:bg-[#8B0000]/20 transition-all"
+            title="Настройки"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8B0000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+        {showSettings && (
+          <SettingsPanel
+            soundEnabled={gameState.soundEnabled}
+            musicVolume={settings.musicVolume}
+            sfxVolume={settings.sfxVolume}
+            difficulty={gameState.difficulty}
+            showHints={settings.showHints}
+            screenShake={settings.screenShake}
+            autoSave={settings.autoSave}
+            onToggleSound={handleToggleSound}
+            onMusicVolumeChange={(v) => setSettings({ ...settings, musicVolume: v })}
+            onSfxVolumeChange={(v) => setSettings({ ...settings, sfxVolume: v })}
+            onDifficultyChange={(d) => setGameState({ ...gameState, difficulty: d })}
+            onToggleHints={() => setSettings({ ...settings, showHints: !settings.showHints })}
+            onToggleScreenShake={() => setSettings({ ...settings, screenShake: !settings.screenShake })}
+            onToggleAutoSave={() => setSettings({ ...settings, autoSave: !settings.autoSave })}
+            onClose={() => setShowSettings(false)}
+          />
+        )}
+        {showStats && (
+          <PlayerStatsPanel
+            stats={playerStats}
+            formatTime={formatTime}
+            onClose={() => setShowStats(false)}
+            onResetStats={handleResetStats}
+          />
+        )}
+      </>
     );
   }
 
   return (
-    <GameScreen 
-      gameState={gameState}
-      locations={locations}
-      antagonists={antagonists}
-      formatTime={formatTime}
-      onVisitLocation={visitLocation}
-      onFindItem={findItem}
-      onHide={hideAction}
-      onExit={handleExit}
-    />
+    <>
+      <GameScreen 
+        gameState={gameState}
+        locations={locations}
+        antagonists={antagonists}
+        formatTime={formatTime}
+        onVisitLocation={visitLocation}
+        onFindItem={findItem}
+        onHide={hideAction}
+        onExit={handleExit}
+      />
+      {showSettings && (
+        <SettingsPanel
+          soundEnabled={gameState.soundEnabled}
+          musicVolume={settings.musicVolume}
+          sfxVolume={settings.sfxVolume}
+          difficulty={gameState.difficulty}
+          showHints={settings.showHints}
+          screenShake={settings.screenShake}
+          autoSave={settings.autoSave}
+          onToggleSound={handleToggleSound}
+          onMusicVolumeChange={(v) => setSettings({ ...settings, musicVolume: v })}
+          onSfxVolumeChange={(v) => setSettings({ ...settings, sfxVolume: v })}
+          onDifficultyChange={(d) => setGameState({ ...gameState, difficulty: d })}
+          onToggleHints={() => setSettings({ ...settings, showHints: !settings.showHints })}
+          onToggleScreenShake={() => setSettings({ ...settings, screenShake: !settings.screenShake })}
+          onToggleAutoSave={() => setSettings({ ...settings, autoSave: !settings.autoSave })}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+      {showStats && (
+        <PlayerStatsPanel
+          stats={playerStats}
+          formatTime={formatTime}
+          onClose={() => setShowStats(false)}
+          onResetStats={handleResetStats}
+        />
+      )}
+    </>
   );
 };
 
